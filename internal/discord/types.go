@@ -123,7 +123,7 @@ func jsonNumber(n int64) string {
 	return string(b)
 }
 
-func BuildMessage(eventID int64, webhook Webhook, payload ExecutePayload, username string, avatar *string) Message {
+func BuildMessage(messageID string, webhook Webhook, payload ExecutePayload, username string, avatar *string) Message {
 	content := ""
 	if payload.Content != nil {
 		content = *payload.Content
@@ -146,7 +146,7 @@ func BuildMessage(eventID int64, webhook Webhook, payload ExecutePayload, userna
 	}
 
 	return Message{
-		ID:        MessageSnowflake(eventID),
+		ID:        messageID,
 		Type:      0,
 		Content:   content,
 		ChannelID: webhook.ChannelID,

@@ -23,11 +23,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/batches/{id}/close", h.closeBatch)
 	mux.HandleFunc("POST /v1/sources", h.createSource)
 	mux.HandleFunc("POST /v1/webhooks", h.createWebhook)
-
-	mux.HandleFunc("GET /api/webhooks/{id}/{token}", h.discordGetWebhook)
 	mux.HandleFunc("POST /api/webhooks/{id}/{token}", h.discordExecuteWebhook)
-	mux.HandleFunc("PATCH /api/webhooks/{id}/{token}/messages/{messageID}", h.discordEditMessage)
-	mux.HandleFunc("DELETE /api/webhooks/{id}/{token}/messages/{messageID}", h.discordDeleteMessage)
 }
 
 func (h *Handler) health(w http.ResponseWriter, r *http.Request) {
@@ -54,13 +50,27 @@ func (h *Handler) ingest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(req.Payload) == 0 {
+		writeError(w, http.StatusBadRequest, "payload is required")
+		return
+	}
+	if !isJSONObject(req.Payload) {
+		writeError(w, http.StatusBadRequest, "payload must be a JSON object")
+		return
+	}
+	if len(req.Metadata) > 0 && !json.Valid(req.Metadata) {
+		writeError(w, http.StatusBadRequest, "metadata must be valid JSON")
+		return
+	}
+
 	result, err := h.store.Ingest(r.Context(), store.IngestInput{
-		Source:     req.Source,
-		EventType:  req.EventType,
-		ExternalID: req.ExternalID,
-		Payload:    req.Payload,
-		Metadata:   req.Metadata,
-		BatchID:    req.BatchID,
+		Source:      req.Source,
+		EventType:   req.EventType,
+		ExternalID:  req.ExternalID,
+		Payload:     req.Payload,
+		Metadata:    req.Metadata,
+		RequestInfo: captureRequestInfo(r),
+		BatchID:     req.BatchID,
 	})
 	if errors.Is(err, store.ErrSourceNotFound) {
 		writeError(w, http.StatusNotFound, "source not found")

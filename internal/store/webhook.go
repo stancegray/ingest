@@ -13,7 +13,6 @@ import (
 )
 
 var ErrWebhookNotFound = errors.New("webhook not found")
-var ErrMessageNotFound = errors.New("message not found")
 
 type WebhookRecord struct {
 	ID        string
@@ -105,12 +104,9 @@ func (s *Store) GetWebhook(ctx context.Context, id, token string) (WebhookRecord
 }
 
 type DiscordIngestInput struct {
-	WebhookID string
-	Token     string
-	Payload   json.RawMessage
-	Metadata  json.RawMessage
-	ThreadID  *string
-	Wait      bool
+	Webhook     WebhookRecord
+	Payload     json.RawMessage
+	RequestInfo json.RawMessage
 }
 
 type DiscordIngestResult struct {
@@ -121,16 +117,11 @@ type DiscordIngestResult struct {
 }
 
 func (s *Store) IngestDiscord(ctx context.Context, in DiscordIngestInput) (DiscordIngestResult, error) {
-	wh, err := s.GetWebhook(ctx, in.WebhookID, in.Token)
-	if err != nil {
-		return DiscordIngestResult{}, err
-	}
-
 	if len(in.Payload) == 0 || !json.Valid(in.Payload) {
 		return DiscordIngestResult{}, fmt.Errorf("invalid payload")
 	}
-	if len(in.Metadata) == 0 {
-		in.Metadata = json.RawMessage(`{}`)
+	if len(in.RequestInfo) == 0 {
+		in.RequestInfo = json.RawMessage(`{}`)
 	}
 
 	tx, err := s.pool.Begin(ctx)
@@ -140,17 +131,17 @@ func (s *Store) IngestDiscord(ctx context.Context, in DiscordIngestInput) (Disco
 	defer tx.Rollback(ctx)
 
 	var sourceID string
-	err = tx.QueryRow(ctx, `SELECT id::text FROM sources WHERE name = $1`, wh.Source).Scan(&sourceID)
+	err = tx.QueryRow(ctx, `SELECT id::text FROM sources WHERE name = $1`, in.Webhook.Source).Scan(&sourceID)
 	if err != nil {
 		return DiscordIngestResult{}, fmt.Errorf("lookup source: %w", err)
 	}
 
 	var eventID int64
 	err = tx.QueryRow(ctx, `
-		INSERT INTO events (source_id, event_type, payload, metadata)
-		VALUES ($1::uuid, 'discord.webhook', $2::jsonb, $3::jsonb)
+		INSERT INTO events (source_id, event_type, payload, metadata, request_info)
+		VALUES ($1::uuid, 'discord.webhook', $2::jsonb, '{}'::jsonb, $3::jsonb)
 		RETURNING id
-	`, sourceID, in.Payload, in.Metadata).Scan(&eventID)
+	`, sourceID, in.Payload, in.RequestInfo).Scan(&eventID)
 	if err != nil {
 		return DiscordIngestResult{}, fmt.Errorf("insert event: %w", err)
 	}
@@ -168,73 +159,9 @@ func (s *Store) IngestDiscord(ctx context.Context, in DiscordIngestInput) (Disco
 	return DiscordIngestResult{
 		EventID:   eventID,
 		MessageID: messageID,
-		Webhook:   wh,
+		Webhook:   in.Webhook,
 		Payload:   in.Payload,
 	}, nil
-}
-
-func (s *Store) UpdateDiscordMessage(ctx context.Context, webhookID, token, messageID string, payload json.RawMessage) (DiscordIngestResult, error) {
-	wh, err := s.GetWebhook(ctx, webhookID, token)
-	if err != nil {
-		return DiscordIngestResult{}, err
-	}
-
-	tag, err := s.pool.Exec(ctx, `
-		UPDATE events e
-		SET payload = $1::jsonb,
-		    metadata = metadata || jsonb_build_object('edited_at', to_jsonb(now()))
-		FROM sources s, webhooks w
-		WHERE e.external_id = $2
-		  AND e.source_id = s.id
-		  AND w.source_id = s.id
-		  AND w.id = $3
-		  AND w.token = $4
-		  AND e.event_type = 'discord.webhook'
-	`, payload, messageID, webhookID, token)
-	if err != nil {
-		return DiscordIngestResult{}, fmt.Errorf("update message: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return DiscordIngestResult{}, ErrMessageNotFound
-	}
-
-	var eventID int64
-	err = s.pool.QueryRow(ctx, `
-		SELECT e.id FROM events e
-		JOIN sources s ON s.id = e.source_id
-		JOIN webhooks w ON w.source_id = s.id
-		WHERE e.external_id = $1 AND w.id = $2 AND w.token = $3
-	`, messageID, webhookID, token).Scan(&eventID)
-	if err != nil {
-		return DiscordIngestResult{}, fmt.Errorf("lookup event: %w", err)
-	}
-
-	return DiscordIngestResult{
-		EventID:   eventID,
-		MessageID: messageID,
-		Webhook:   wh,
-		Payload:   payload,
-	}, nil
-}
-
-func (s *Store) DeleteDiscordMessage(ctx context.Context, webhookID, token, messageID string) error {
-	tag, err := s.pool.Exec(ctx, `
-		DELETE FROM events e
-		USING sources s, webhooks w
-		WHERE e.external_id = $1
-		  AND e.source_id = s.id
-		  AND w.source_id = s.id
-		  AND w.id = $2
-		  AND w.token = $3
-		  AND e.event_type = 'discord.webhook'
-	`, messageID, webhookID, token)
-	if err != nil {
-		return fmt.Errorf("delete message: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrMessageNotFound
-	}
-	return nil
 }
 
 func randomToken(n int) (string, error) {

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"mime"
-	"mime/multipart"
 	"net/http"
 	"strings"
 
@@ -43,9 +42,10 @@ func (h *Handler) createWebhook(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, result)
 }
 
-func (h *Handler) discordGetWebhook(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) discordExecuteWebhook(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	token := r.PathValue("token")
+	wait := r.URL.Query().Get("wait") == "true"
 
 	wh, err := h.store.GetWebhook(r.Context(), id, token)
 	if errors.Is(err, store.ErrWebhookNotFound) {
@@ -56,24 +56,6 @@ func (h *Handler) discordGetWebhook(w http.ResponseWriter, r *http.Request) {
 		writeDiscordError(w, http.StatusInternalServerError, "Internal server error", 0)
 		return
 	}
-
-	writeJSON(w, http.StatusOK, discord.Webhook{
-		ID:          wh.ID,
-		Type:        1,
-		Name:        wh.Name,
-		Avatar:      wh.Avatar,
-		ChannelID:   wh.ChannelID,
-		GuildID:     wh.GuildID,
-		Token:       wh.Token,
-		Application: nil,
-	})
-}
-
-func (h *Handler) discordExecuteWebhook(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	token := r.PathValue("token")
-	wait := r.URL.Query().Get("wait") == "true"
-	threadID := r.URL.Query().Get("thread_id")
 
 	payload, files, err := parseDiscordExecuteBody(r)
 	if err != nil {
@@ -87,37 +69,26 @@ func (h *Handler) discordExecuteWebhook(w http.ResponseWriter, r *http.Request) 
 	}
 
 	rawPayload, err := json.Marshal(payload)
-	if err != nil {
+	if err != nil || !isJSONObject(rawPayload) {
 		writeDiscordError(w, http.StatusBadRequest, "Invalid Form Body", 50035)
 		return
 	}
 
-	metadata := map[string]any{
-		"webhook_id": id,
-		"wait":       wait,
-	}
-	if threadID != "" {
-		metadata["thread_id"] = threadID
-	}
+	requestInfo := captureRequestInfo(r)
 	if len(files) > 0 {
-		metadata["files"] = files
+		var info map[string]any
+		_ = json.Unmarshal(requestInfo, &info)
+		info["files"] = files
+		requestInfo, _ = json.Marshal(info)
 	}
-	metaJSON, _ := json.Marshal(metadata)
 
 	result, err := h.store.IngestDiscord(r.Context(), store.DiscordIngestInput{
-		WebhookID: id,
-		Token:     token,
-		Payload:   rawPayload,
-		Metadata:  metaJSON,
-		ThreadID:  optionalString(threadID),
-		Wait:      wait,
+		Webhook:     wh,
+		Payload:     rawPayload,
+		RequestInfo: requestInfo,
 	})
-	if errors.Is(err, store.ErrWebhookNotFound) {
-		writeDiscordError(w, http.StatusNotFound, "Unknown Webhook", 10015)
-		return
-	}
 	if err != nil {
-		writeDiscordError(w, http.StatusBadRequest, err.Error(), 50035)
+		writeDiscordError(w, http.StatusInternalServerError, "Internal server error", 0)
 		return
 	}
 
@@ -126,7 +97,7 @@ func (h *Handler) discordExecuteWebhook(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	username := result.Webhook.Name
+	username := wh.Name
 	var avatar *string
 	if payload.Username != nil && *payload.Username != "" {
 		username = *payload.Username
@@ -134,92 +105,17 @@ func (h *Handler) discordExecuteWebhook(w http.ResponseWriter, r *http.Request) 
 	if payload.AvatarURL != nil && *payload.AvatarURL != "" {
 		avatar = payload.AvatarURL
 	} else {
-		avatar = result.Webhook.Avatar
+		avatar = wh.Avatar
 	}
 
-	msg := discord.BuildMessage(result.EventID, discord.Webhook{
-		ID:        result.Webhook.ID,
-		Name:      result.Webhook.Name,
-		Avatar:    result.Webhook.Avatar,
-		ChannelID: result.Webhook.ChannelID,
+	msg := discord.BuildMessage(result.MessageID, discord.Webhook{
+		ID:        wh.ID,
+		Name:      wh.Name,
+		Avatar:    wh.Avatar,
+		ChannelID: wh.ChannelID,
 	}, payload, username, avatar)
 
 	writeJSON(w, http.StatusOK, msg)
-}
-
-func (h *Handler) discordEditMessage(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	token := r.PathValue("token")
-	messageID := r.PathValue("messageID")
-
-	var payload discord.ExecutePayload
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		writeDiscordError(w, http.StatusBadRequest, "Invalid Form Body", 50035)
-		return
-	}
-	if !payload.HasDeliverableContent(false) {
-		writeDiscordError(w, http.StatusBadRequest, "Cannot send an empty message", 50006)
-		return
-	}
-
-	rawPayload, err := json.Marshal(payload)
-	if err != nil {
-		writeDiscordError(w, http.StatusBadRequest, "Invalid Form Body", 50035)
-		return
-	}
-
-	result, err := h.store.UpdateDiscordMessage(r.Context(), id, token, messageID, rawPayload)
-	if errors.Is(err, store.ErrWebhookNotFound) {
-		writeDiscordError(w, http.StatusNotFound, "Unknown Webhook", 10015)
-		return
-	}
-	if errors.Is(err, store.ErrMessageNotFound) {
-		writeDiscordError(w, http.StatusNotFound, "Unknown Message", 10008)
-		return
-	}
-	if err != nil {
-		writeDiscordError(w, http.StatusBadRequest, err.Error(), 50035)
-		return
-	}
-
-	username := result.Webhook.Name
-	var avatar *string
-	if payload.Username != nil && *payload.Username != "" {
-		username = *payload.Username
-	} else {
-		avatar = result.Webhook.Avatar
-	}
-
-	msg := discord.BuildMessage(result.EventID, discord.Webhook{
-		ID:        result.Webhook.ID,
-		Name:      result.Webhook.Name,
-		Avatar:    result.Webhook.Avatar,
-		ChannelID: result.Webhook.ChannelID,
-	}, payload, username, avatar)
-
-	writeJSON(w, http.StatusOK, msg)
-}
-
-func (h *Handler) discordDeleteMessage(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	token := r.PathValue("token")
-	messageID := r.PathValue("messageID")
-
-	err := h.store.DeleteDiscordMessage(r.Context(), id, token, messageID)
-	if errors.Is(err, store.ErrWebhookNotFound) {
-		writeDiscordError(w, http.StatusNotFound, "Unknown Webhook", 10015)
-		return
-	}
-	if errors.Is(err, store.ErrMessageNotFound) {
-		writeDiscordError(w, http.StatusNotFound, "Unknown Message", 10008)
-		return
-	}
-	if err != nil {
-		writeDiscordError(w, http.StatusInternalServerError, err.Error(), 0)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func parseDiscordExecuteBody(r *http.Request) (discord.ExecutePayload, []map[string]any, error) {
@@ -236,7 +132,7 @@ func parseDiscordExecuteBody(r *http.Request) (discord.ExecutePayload, []map[str
 }
 
 func parseMultipartExecute(r *http.Request) (discord.ExecutePayload, []map[string]any, error) {
-	mediaType, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || !strings.HasPrefix(mediaType, "multipart/") {
 		return discord.ExecutePayload{}, nil, err
 	}
@@ -272,30 +168,17 @@ func parseMultipartExecute(r *http.Request) (discord.ExecutePayload, []map[strin
 				return discord.ExecutePayload{}, nil, err
 			}
 			files = append(files, map[string]any{
-				"field":         name,
-				"filename":      part.FileName(),
-				"content_type":  part.Header.Get("Content-Type"),
-				"size":          len(data),
-				"stored_inline": false,
+				"field":        name,
+				"filename":     part.FileName(),
+				"content_type": part.Header.Get("Content-Type"),
+				"size":         len(data),
 			})
 		}
 	}
-
-	if _, ok := params["boundary"]; !ok {
-		return discord.ExecutePayload{}, files, nil
-	}
-	_ = multipart.Form{Value: map[string][]string{}, File: map[string][]*multipart.FileHeader{}}
 
 	return payload, files, nil
 }
 
 func writeDiscordError(w http.ResponseWriter, status int, message string, code int) {
 	writeJSON(w, status, discord.APIError{Message: message, Code: code})
-}
-
-func optionalString(v string) *string {
-	if v == "" {
-		return nil
-	}
-	return &v
 }

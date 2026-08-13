@@ -13,12 +13,13 @@ import (
 var ErrSourceNotFound = errors.New("source not found")
 
 type IngestInput struct {
-	Source     string
-	EventType  string
-	ExternalID *string
-	Payload    json.RawMessage
-	Metadata   json.RawMessage
-	BatchID    *string
+	Source      string
+	EventType   string
+	ExternalID  *string
+	Payload     json.RawMessage
+	Metadata    json.RawMessage
+	RequestInfo json.RawMessage
+	BatchID     *string
 }
 
 type IngestResult struct {
@@ -48,10 +49,22 @@ func (s *Store) Ingest(ctx context.Context, in IngestInput) (IngestResult, error
 	if !json.Valid(in.Payload) {
 		return IngestResult{}, fmt.Errorf("payload must be valid JSON")
 	}
+	var payloadCheck any
+	if err := json.Unmarshal(in.Payload, &payloadCheck); err != nil {
+		return IngestResult{}, fmt.Errorf("payload must be valid JSON")
+	}
+	if _, ok := payloadCheck.(map[string]any); !ok {
+		return IngestResult{}, fmt.Errorf("payload must be a JSON object")
+	}
 	if len(in.Metadata) == 0 {
 		in.Metadata = json.RawMessage(`{}`)
 	} else if !json.Valid(in.Metadata) {
 		return IngestResult{}, fmt.Errorf("metadata must be valid JSON")
+	}
+	if len(in.RequestInfo) == 0 {
+		in.RequestInfo = json.RawMessage(`{}`)
+	} else if !json.Valid(in.RequestInfo) {
+		return IngestResult{}, fmt.Errorf("request_info must be valid JSON")
 	}
 
 	tx, err := s.pool.Begin(ctx)
@@ -87,10 +100,10 @@ func (s *Store) Ingest(ctx context.Context, in IngestInput) (IngestResult, error
 
 	var eventID int64
 	err = tx.QueryRow(ctx, `
-		INSERT INTO events (source_id, batch_id, event_type, external_id, payload, metadata)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5::jsonb, $6::jsonb)
+		INSERT INTO events (source_id, batch_id, event_type, external_id, payload, metadata, request_info)
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb)
 		RETURNING id
-	`, sourceID, batchID, in.EventType, in.ExternalID, in.Payload, in.Metadata).Scan(&eventID)
+	`, sourceID, batchID, in.EventType, in.ExternalID, in.Payload, in.Metadata, in.RequestInfo).Scan(&eventID)
 	if err != nil {
 		return IngestResult{}, fmt.Errorf("insert event: %w", err)
 	}

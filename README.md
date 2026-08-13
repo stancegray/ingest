@@ -17,9 +17,10 @@ This mirrors Discord's execute-webhook API:
 | Method | Path | Behavior |
 |--------|------|----------|
 | `POST` | `/api/webhooks/{id}/{token}` | Ingest message (returns `204`, or `200` + message with `?wait=true`) |
-| `GET` | `/api/webhooks/{id}/{token}` | Webhook metadata |
-| `PATCH` | `/api/webhooks/{id}/{token}/messages/{message.id}` | Update stored message |
-| `DELETE` | `/api/webhooks/{id}/{token}/messages/{message.id}` | Delete stored message |
+
+Only valid requests are stored. Invalid payloads, unknown webhooks, and empty messages return an error with no database write.
+
+Each stored event includes a `request_info` JSON column with method, path, query params, headers, remote address, and user agent.
 
 ### 1. Create a webhook
 
@@ -97,4 +98,4 @@ See `internal/db/migrations/` for full DDL.
 | `sources` | Named producers (API, webhook, file import) |
 | `webhooks` | Discord-style webhook credentials (`id` + `token`) |
 | `batches` | Optional grouping for bulk/replay tracking |
-| `events` | One row per ingested record (`payload` JSONB) |
+| `events` | One row per valid ingested record (`payload`, `request_info` JSONB) |
