@@ -14,6 +14,18 @@ func main() {
 	keyPath := flag.String("key", "keys/private.pem", "path to private key PEM")
 	flag.Parse()
 
+	if info, err := os.Stat(*keyPath); err != nil || info.IsDir() {
+		log.Fatalf(`decrypt is a local-only tool, not a server.
+
+Private key not found at %q. Generate keys locally:
+  go run ./cmd/keygen
+
+Then decrypt an envelope from stdin:
+  cat payload.json | go run ./cmd/decrypt -key keys/private.pem
+
+Do not deploy or run cmd/decrypt on Railway — use cmd/ingest instead.`, *keyPath)
+	}
+
 	keyPEM, err := os.ReadFile(*keyPath)
 	if err != nil {
 		log.Fatalf("read key: %v", err)
