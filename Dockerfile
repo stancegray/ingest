@@ -4,17 +4,17 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN go build -o /ingest ./cmd/ingest
+RUN go build -o bin/ingest ./cmd/ingest
 
 FROM alpine:3.20
 
 RUN apk add --no-cache ca-certificates
 WORKDIR /app
 
-COPY --from=build /ingest /app/ingest
+COPY --from=build /app/bin/ingest /app/bin/ingest
 COPY keys/public.pem /app/keys/public.pem
 
 ENV INGEST_PUBLIC_KEY_FILE=/app/keys/public.pem
 
 EXPOSE 8080
-CMD ["/app/ingest"]
+CMD ["/app/bin/ingest"]
