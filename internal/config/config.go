@@ -7,8 +7,9 @@ import (
 )
 
 type Config struct {
-	Port        int
-	DatabaseURL string
+	Port          int
+	DatabaseURL   string
+	PublicKeyPEM  []byte
 }
 
 func Load() (Config, error) {
@@ -28,8 +29,34 @@ func Load() (Config, error) {
 		dbURL = "postgres://ingest:ingest@localhost:5432/ingest?sslmode=disable"
 	}
 
+	publicKeyPEM, err := loadPublicKeyPEM()
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
-		Port:        port,
-		DatabaseURL: dbURL,
+		Port:         port,
+		DatabaseURL:  dbURL,
+		PublicKeyPEM: publicKeyPEM,
 	}, nil
+}
+
+func loadPublicKeyPEM() ([]byte, error) {
+	if inline := os.Getenv("INGEST_PUBLIC_KEY"); inline != "" {
+		return []byte(inline), nil
+	}
+
+	path := os.Getenv("INGEST_PUBLIC_KEY_FILE")
+	if path == "" {
+		path = "keys/public.pem"
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) && os.Getenv("INGEST_PUBLIC_KEY_FILE") == "" {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read public key: %w", err)
+	}
+	return data, nil
 }

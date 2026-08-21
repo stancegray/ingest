@@ -12,6 +12,7 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/main/ingest/internal/config"
+	"github.com/main/ingest/internal/crypto"
 	"github.com/main/ingest/internal/db"
 	"github.com/main/ingest/internal/handler"
 	"github.com/main/ingest/internal/store"
@@ -37,7 +38,16 @@ func main() {
 		log.Fatalf("migrate: %v", err)
 	}
 
-	s := store.New(pool)
+	var encryptor *crypto.Encryptor
+	if len(cfg.PublicKeyPEM) > 0 {
+		encryptor, err = crypto.NewEncryptorFromPEM(cfg.PublicKeyPEM)
+		if err != nil {
+			log.Fatalf("public key: %v", err)
+		}
+		log.Println("payload encryption enabled")
+	}
+
+	s := store.New(pool, encryptor)
 	h := handler.New(s)
 
 	mux := http.NewServeMux()
@@ -47,8 +57,8 @@ func main() {
 		Addr:         fmt.Sprintf(":%d", cfg.Port),
 		Handler:      loggingMiddleware(mux),
 		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		WriteTimeout: 0,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	go func() {

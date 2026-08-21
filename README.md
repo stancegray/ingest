@@ -67,6 +67,81 @@ Point any Discord webhook client at your server instead of `discord.com`:
 https://your-host/api/webhooks/{id}/{token}
 ```
 
+## Realtime event stream
+
+Subscribe to new events as they are ingested via **Server-Sent Events (SSE)**:
+
+```bash
+curl -N http://localhost:8080/v1/events/stream
+```
+
+Optional filters:
+
+```bash
+curl -N "http://localhost:8080/v1/events/stream?source=webhook&event_type=discord.webhook"
+```
+
+**Browser / Node client:**
+
+```javascript
+const es = new EventSource("http://localhost:8080/v1/events/stream?source=webhook");
+
+es.addEventListener("message", (e) => {
+  const event = JSON.parse(e.data);
+  console.log("new event", event.id, event.payload);
+});
+
+es.onerror = () => console.error("stream disconnected");
+```
+
+Each `message` event contains the full row: `id`, `source`, `event_type`, `payload`, `request_info`, `ingested_at`, etc.
+
+Under the hood Postgres `NOTIFY` fires on every insert, and the server pushes it to connected clients with minimal delay.
+
+## Payload encryption
+
+Payloads are encrypted at ingest time with a **hybrid RSA + AES-GCM** envelope before being written to Postgres. Only your local private key can decrypt them.
+
+### 1. Generate keys (local, one-time)
+
+```bash
+go run ./cmd/keygen
+```
+
+This creates:
+
+- `keys/private.pem` — **keep on your machine, never deploy**
+- `keys/public.pem` — deploy to the server
+
+### 2. Configure the server
+
+```bash
+export INGEST_PUBLIC_KEY_FILE=keys/public.pem
+# or paste PEM into INGEST_PUBLIC_KEY
+go run ./cmd/ingest
+```
+
+On Railway, set `INGEST_PUBLIC_KEY` to the contents of `public.pem`.
+
+### 3. Decrypt locally
+
+Pipe an encrypted `payload` from the DB or SSE stream:
+
+```bash
+curl -N http://localhost:8080/v1/events/stream | while read -r line; do
+  echo "$line"
+done
+
+# decrypt an envelope JSON file:
+cat envelope.json | go run ./cmd/decrypt -key keys/private.pem
+```
+
+Stored envelope format:
+
+```json
+{"v":1,"ek":"...","n":"...","c":"..."}
+```
+
 ## Generic ingest API
 
 ### Health

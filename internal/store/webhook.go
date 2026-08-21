@@ -124,6 +124,11 @@ func (s *Store) IngestDiscord(ctx context.Context, in DiscordIngestInput) (Disco
 		in.RequestInfo = json.RawMessage(`{}`)
 	}
 
+	storedPayload, err := s.sealPayload(in.Payload)
+	if err != nil {
+		return DiscordIngestResult{}, err
+	}
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return DiscordIngestResult{}, fmt.Errorf("begin tx: %w", err)
@@ -141,7 +146,7 @@ func (s *Store) IngestDiscord(ctx context.Context, in DiscordIngestInput) (Disco
 		INSERT INTO events (source_id, event_type, payload, metadata, request_info)
 		VALUES ($1::uuid, 'discord.webhook', $2::jsonb, '{}'::jsonb, $3::jsonb)
 		RETURNING id
-	`, sourceID, in.Payload, in.RequestInfo).Scan(&eventID)
+	`, sourceID, storedPayload, in.RequestInfo).Scan(&eventID)
 	if err != nil {
 		return DiscordIngestResult{}, fmt.Errorf("insert event: %w", err)
 	}

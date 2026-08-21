@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var ErrSourceNotFound = errors.New("source not found")
@@ -26,14 +25,6 @@ type IngestResult struct {
 	ID        int64  `json:"id"`
 	Source    string `json:"source"`
 	EventType string `json:"event_type"`
-}
-
-type Store struct {
-	pool *pgxpool.Pool
-}
-
-func New(pool *pgxpool.Pool) *Store {
-	return &Store{pool: pool}
 }
 
 func (s *Store) Ingest(ctx context.Context, in IngestInput) (IngestResult, error) {
@@ -65,6 +56,11 @@ func (s *Store) Ingest(ctx context.Context, in IngestInput) (IngestResult, error
 		in.RequestInfo = json.RawMessage(`{}`)
 	} else if !json.Valid(in.RequestInfo) {
 		return IngestResult{}, fmt.Errorf("request_info must be valid JSON")
+	}
+
+	storedPayload, err := s.sealPayload(in.Payload)
+	if err != nil {
+		return IngestResult{}, err
 	}
 
 	tx, err := s.pool.Begin(ctx)
@@ -103,7 +99,7 @@ func (s *Store) Ingest(ctx context.Context, in IngestInput) (IngestResult, error
 		INSERT INTO events (source_id, batch_id, event_type, external_id, payload, metadata, request_info)
 		VALUES ($1::uuid, $2::uuid, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb)
 		RETURNING id
-	`, sourceID, batchID, in.EventType, in.ExternalID, in.Payload, in.Metadata, in.RequestInfo).Scan(&eventID)
+	`, sourceID, batchID, in.EventType, in.ExternalID, storedPayload, in.Metadata, in.RequestInfo).Scan(&eventID)
 	if err != nil {
 		return IngestResult{}, fmt.Errorf("insert event: %w", err)
 	}

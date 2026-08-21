@@ -24,6 +24,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/sources", h.createSource)
 	mux.HandleFunc("POST /v1/webhooks", h.createWebhook)
 	mux.HandleFunc("POST /api/webhooks/{id}/{token}", h.discordExecuteWebhook)
+	mux.HandleFunc("GET /v1/events/stream", h.streamEvents)
 }
 
 func (h *Handler) health(w http.ResponseWriter, r *http.Request) {

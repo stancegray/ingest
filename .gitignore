@@ -1,4 +1,6 @@
 .env
 /bin/
+/keys/
+*.pem
 *.exe
 *.test
