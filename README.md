@@ -5,6 +5,20 @@ HTTP service that accepts JSON records and stores them in PostgreSQL. Includes a
 ## Quick start
 
 ```bash
+make deploy
+```
+
+Starts Postgres and the ingest app in Docker. No manual steps.
+
+Alternative for local Go development (Postgres in Docker, app on host):
+
+```bash
+make dev
+```
+
+## Manual setup
+
+```bash
 docker compose up -d
 cp .env.example .env
 go run ./cmd/ingest

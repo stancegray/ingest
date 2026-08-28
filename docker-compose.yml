@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: ingest
       POSTGRES_DB: ingest
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5433}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -14,6 +14,19 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  ingest:
+    build: .
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      PORT: 8080
+      DATABASE_URL: postgres://ingest:ingest@postgres:5432/ingest?sslmode=disable
+      INGEST_PUBLIC_KEY_FILE: /app/keys/public.pem
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   pgdata:
