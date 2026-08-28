@@ -11,6 +11,16 @@ type responseRecorder struct {
 	silentDrop bool
 }
 
+func (rec *responseRecorder) Flush() {
+	if flusher, ok := rec.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func (rec *responseRecorder) Unwrap() http.ResponseWriter {
+	return rec.ResponseWriter
+}
+
 func MarkSilentDrop(w http.ResponseWriter) {
 	if rec, ok := w.(*responseRecorder); ok {
 		rec.silentDrop = true
