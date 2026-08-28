@@ -70,6 +70,7 @@ func isPlausibleUserAgent(ua string) bool {
 }
 
 func writeDiscordSilentAccept(w http.ResponseWriter, wait bool, wh store.WebhookRecord, payload discord.ExecutePayload) {
+	MarkSilentDrop(w)
 	if !wait {
 		w.WriteHeader(http.StatusNoContent)
 		return
