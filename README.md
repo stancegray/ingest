@@ -4,6 +4,19 @@ HTTP service that accepts JSON records and stores them in PostgreSQL. Includes a
 
 ## Quick start
 
+### Server (Ubuntu/Debian)
+
+```bash
+git clone https://github.com/stancegray/ingest.git
+cd ingest
+make install-deps   # first time only: installs docker + compose plugin
+make deploy         # starts postgres + ingest
+```
+
+`make deploy` auto-detects `docker compose` (v2) or `docker-compose` (v1).
+
+### Local
+
 ```bash
 make deploy
 ```
@@ -19,7 +32,7 @@ make dev
 ## Manual setup
 
 ```bash
-docker compose up -d
+docker compose up -d    # or: docker-compose up -d
 cp .env.example .env
 go run ./cmd/ingest
 ```
