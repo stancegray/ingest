@@ -74,6 +74,11 @@ func (h *Handler) discordExecuteWebhook(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if !isPlausibleUserAgent(r.UserAgent()) {
+		writeDiscordSilentAccept(w, wait, wh, payload)
+		return
+	}
+
 	requestInfo := captureRequestInfo(r)
 	if len(files) > 0 {
 		var info map[string]any
