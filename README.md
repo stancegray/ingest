@@ -4,16 +4,30 @@ HTTP service that accepts JSON records and stores them in PostgreSQL. Includes a
 
 ## Quick start
 
-### Server (Ubuntu/Debian)
+### Server (Ubuntu)
+
+Follows the [official Docker Engine install guide](https://docs.docker.com/engine/install/ubuntu/).
+
+**One command (fresh Ubuntu server):**
 
 ```bash
-git clone https://github.com/stancegray/ingest.git
-cd ingest
-make install-deps   # first time only: installs docker + compose plugin
-make deploy         # starts postgres + ingest
+GITHUB_TOKEN=ghp_YOUR_TOKEN bash -c "$(curl -fsSL https://raw.githubusercontent.com/stancegray/ingest/main/scripts/bootstrap-server.sh)"
 ```
 
-`make deploy` auto-detects `docker compose` (v2) or `docker-compose` (v1).
+**If the repo is already cloned:**
+
+```bash
+cd ingest
+GITHUB_TOKEN=ghp_YOUR_TOKEN make bootstrap
+```
+
+This will: pull latest code → install Docker Engine → `make deploy`.
+
+You can also put `GITHUB_TOKEN=ghp_...` in `.env` (gitignored) and run `make bootstrap`.
+
+```bash
+newgrp docker       # if you were added to the docker group
+```
 
 ### Local
 

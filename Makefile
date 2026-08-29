@@ -2,6 +2,8 @@
 
 PORT ?= 8080
 POSTGRES_PORT ?= 5433
+INSTALL_DOCKER_SCRIPT := scripts/install-docker-ubuntu.sh
+BOOTSTRAP_SCRIPT := scripts/bootstrap-server.sh
 
 # Server-friendly: support both "docker compose" (v2 plugin) and "docker-compose" (v1).
 COMPOSE := $(shell \
@@ -14,37 +16,50 @@ COMPOSE := $(shell \
 	fi \
 )
 
-.PHONY: deploy up down stop restart logs ps env keys dev run check install-deps
+.PHONY: deploy up down stop restart logs ps env keys dev run check install install-deps install-docker bootstrap pull
 
 ifeq ($(COMPOSE),missing)
 deploy up down stop restart logs ps dev postgres:
 	@echo "Docker Compose not found."
 	@echo ""
-	@echo "On Ubuntu/Debian server, run:"
+	@echo "Run full server setup:"
+	@echo "  GITHUB_TOKEN=ghp_... make bootstrap"
+	@echo ""
+	@echo "Or install Docker only:"
 	@echo "  make install-deps"
 	@echo ""
-	@echo "Or install manually:"
-	@echo "  sudo apt update && sudo apt install -y docker.io docker-compose-plugin curl"
-	@echo "  sudo usermod -aG docker \$$USER && newgrp docker"
+	@echo "Docs: https://docs.docker.com/engine/install/ubuntu/"
 	@exit 1
 endif
 
 ## Verify docker + compose are available
 check:
-	@command -v docker >/dev/null || (echo "Missing: docker" && exit 1)
-	@$(COMPOSE) version >/dev/null || (echo "Missing: docker compose" && exit 1)
+	@command -v docker >/dev/null || (echo "Missing: docker" >&2; exit 1)
+	@$(COMPOSE) version >/dev/null || (echo "Missing: docker compose" >&2; exit 1)
 	@command -v curl >/dev/null || echo "Warning: curl not found (health wait will be skipped)"
 	@echo "OK: $$(docker --version)"
 	@echo "OK: $$($(COMPOSE) version | head -1)"
 
-## Install Docker + Compose on Ubuntu/Debian (run on fresh server)
-install-deps:
-	@command -v apt-get >/dev/null || (echo "install-deps supports apt-based systems only" && exit 1)
-	sudo apt-get update
-	sudo apt-get install -y docker.io docker-compose-plugin curl
-	sudo systemctl enable --now docker
-	@echo ""
-	@echo "Docker installed. If needed: sudo usermod -aG docker $$USER && newgrp docker"
+## Install base system packages (git, curl, make)
+install:
+	@test -f scripts/install-system.sh || (echo "Missing scripts/install-system.sh" >&2; exit 1)
+	bash scripts/install-system.sh
+
+## Install Docker Engine on Ubuntu via Docker apt repository (official guide)
+install-deps install-docker:
+	@test -f $(INSTALL_DOCKER_SCRIPT) || (echo "Missing $(INSTALL_DOCKER_SCRIPT)" >&2; exit 1)
+	bash $(INSTALL_DOCKER_SCRIPT)
+
+## Pull latest code from GitHub (requires GITHUB_TOKEN)
+pull:
+	@test -n "$(GITHUB_TOKEN)" || (echo "Usage: GITHUB_TOKEN=ghp_... make pull" >&2; exit 1)
+	git remote set-url origin https://github.com/stancegray/ingest.git
+	git pull https://x-access-token:$(GITHUB_TOKEN)@github.com/stancegray/ingest.git main
+
+## Full server setup: git pull, Docker install, deploy
+bootstrap:
+	@test -f $(BOOTSTRAP_SCRIPT) || (echo "Missing $(BOOTSTRAP_SCRIPT)" >&2; exit 1)
+	@GITHUB_TOKEN="$(GITHUB_TOKEN)" bash $(BOOTSTRAP_SCRIPT)
 
 ## Start postgres + ingest (build if needed)
 deploy up: check env keys
